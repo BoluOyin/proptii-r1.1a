@@ -160,178 +160,102 @@ const Home = () => {
           <p className="text-xl md:text-2xl mb-12 max-w-2xl mx-auto font-light">
             We make finding and securing your home easy, every step of the way.
           </p>
+          {/* Search Bar */}
+          <div className="bg-white border border-gray-200 rounded-2xl shadow w-[60%] mx-auto px-4 pt-4 pb-3 flex flex-col items-stretch" style={{ minHeight: 56 }}>
+            {/* Textarea Row */}
+            <div className="flex flex-row items-end">
+              <textarea
+                id="property-search"
+                aria-label="Search for properties"
+                className="flex-1 bg-transparent text-gray-900 outline-none text-lg resize-none leading-[1.4] min-h-[40px] max-h-[120px] py-2 overflow-y-auto"
+                placeholder="Search for properties..."
+                value={searchQuery}
+                onChange={e => {
+                  const value = e.target.value;
+                  const lines = value.split('\n');
+                  if (lines.length <= 5) {
+                    setSearchQuery(value);
+                  } else {
+                    setSearchQuery(lines.slice(0, 5).join('\n'));
+                  }
+                  // Auto-expand logic
+                  const textarea = e.target as HTMLTextAreaElement;
+                  textarea.style.height = '40px';
+                  const maxHeight = 24 * 5;
+                  textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+                }}
+                onInput={e => {
+                  const textarea = e.currentTarget;
+                  textarea.style.height = '40px';
+                  const maxHeight = 24 * 5;
+                  textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+                }}
+                onKeyDown={e => {
+                  if (
+                    e.key === 'Enter' &&
+                    (searchQuery.match(/\n/g)?.length ?? 0) >= 4
+                  ) {
+                    e.preventDefault();
+                  }
+                }}
+                onPaste={e => {
+                  const paste = e.clipboardData.getData('text');
+                  const currentLines = searchQuery.split('\n');
+                  const pasteLines = paste.split('\n');
+                  if (currentLines.length + pasteLines.length - 1 > 5) {
+                    e.preventDefault();
+                    const allowedLines = 5 - currentLines.length;
+                    if (allowedLines > 0) {
+                      const toPaste = pasteLines.slice(0, allowedLines).join('\n');
+                      setSearchQuery(searchQuery + (searchQuery ? '\n' : '') + toPaste);
+                    }
+                  }
+                }}
+                rows={1}
+                style={{
+                  lineHeight: '24px',
+                  minHeight: '40px',
+                  maxHeight: '120px', // 5 lines * 24px
+                  resize: 'none',
+                  overflowY: 'auto',
+                  border: 'none',
+                  background: 'transparent',
+                  padding: 0,
+                  margin: 0,
+                  transition: 'height 0.15s',
+                  display: 'block',
+                }}
+                maxLength={1000}
+              />
+            </div>
+            {/* Icons and Search Button Below */}
+            <div className="flex flex-row items-center mt-3">
+              <div className="flex flex-row gap-4 items-center">
+                <button className="text-gray-400 hover:text-gray-600 transition-colors flex items-center justify-center">
+                  <Camera className="w-6 h-6" />
+                </button>
+                <button className="text-gray-400 hover:text-gray-600 transition-colors flex items-center justify-center">
+                  <Mic className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="flex-1"></div>
+              <button
+                className={`bg-primary text-white p-3 rounded-full transition-all shadow flex items-center justify-center ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-90'
+                }`}
+                onClick={handleSearch}
+                disabled={isLoading || !searchQuery.trim()}
+                style={{ minWidth: 48, minHeight: 48 }}
+              >
+                {isLoading ? (
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>  
+                ) : (
+                  <AISearchIcon className="w-6 h-6" />
+                )}
+              </button>
+            </div>
+          </div>
 
-          {/* Search Bar */}<div className="bg-white border border-gray-200 rounded-2xl shadow w-[60%] mx-auto px-4 py-2 flex items-center" style={{ minHeight: 48 }}>
-  {/* Left Icons */}
- <div className="bg-white border border-gray-200 rounded-2xl shadow w-[60%] mx-auto px-4 py-2 flex items-end" style={{ minHeight: 48 }}>
-  {/* Left Icons */}
-  <div className="flex flex-row gap-2 items-end mr-2 pb-1">
-    <button className="text-gray-400 hover:text-gray-600 transition-colors flex items-end justify-center">
-      <Camera className="w-5 h-5" />
-    </button>
-    <button className="text-gray-400 hover:text-gray-600 transition-colors flex items-end justify-center">
-      <Mic className="w-5 h-5" />
-    </button>
-  </div>
-  {/* Textarea */}
-  <textarea
-    id="property-search"
-    aria-label="Search for properties"
-    className="flex-1 bg-transparent text-gray-900 outline-none text-base resize-none leading-[1.4] min-h-[24px] max-h-[120px] overflow-y-auto"
-    placeholder="Search for properties..."
-    value={searchQuery}
-    onChange={e => {
-      const value = e.target.value;
-      const lines = value.split('\n');
-      if (lines.length <= 5) {
-        setSearchQuery(value);
-      } else {
-        setSearchQuery(lines.slice(0, 5).join('\n'));
-      }
-      // Auto-expand logic
-      const textarea = e.target as HTMLTextAreaElement;
-      textarea.style.height = '24px';
-      const maxHeight = 24 * 5;
-      textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
-    }}
-    onInput={e => {
-      const textarea = e.currentTarget;
-      textarea.style.height = '24px';
-      const maxHeight = 24 * 5;
-      textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
-    }}
-    onKeyDown={e => {
-      if (
-        e.key === 'Enter' &&
-        (searchQuery.match(/\n/g)?.length ?? 0) >= 4
-      ) {
-        e.preventDefault();
-      }
-    }}
-    onPaste={e => {
-      const paste = e.clipboardData.getData('text');
-      const currentLines = searchQuery.split('\n');
-      const pasteLines = paste.split('\n');
-      if (currentLines.length + pasteLines.length - 1 > 5) {
-        e.preventDefault();
-        const allowedLines = 5 - currentLines.length;
-        if (allowedLines > 0) {
-          const toPaste = pasteLines.slice(0, allowedLines).join('\n');
-          setSearchQuery(searchQuery + (searchQuery ? '\n' : '') + toPaste);
-        }
-      }
-    }}
-    rows={1}
-    style={{
-      lineHeight: '24px',
-      minHeight: '24px',
-      maxHeight: '120px', // 5 lines * 24px
-      resize: 'none',
-      overflowY: 'auto',
-      border: 'none',
-      background: 'transparent',
-      padding: 0,
-      margin: 0,
-      transition: 'height 0.15s',
-      display: 'block',
-    }}
-    maxLength={1000}
-  />
-  {/* Search Button */}
-  <button
-    className={`ml-2 bg-primary text-white p-2 rounded-full transition-all shadow flex items-end justify-center ${
-      isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-90'
-    }`}
-    onClick={handleSearch}
-    disabled={isLoading || !searchQuery.trim()}s
-    style={{ minWidth: 40, minHeight: 40, alignSelf: 'end' }}
-  >
-    {isLoading ? (
-      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-    ) : (
-      <AISearchIcon className="w-5 h-5" />
-    )}
-  </button>
-</div>
-  {/* Textarea */}
-  <textarea
-    id="property-search"
-    aria-label="Search for properties"
-    className="flex-1 bg-transparent text-gray-900 outline-none text-base resize-none leading-[1.4] min-h-[24px] max-h-[120px] py-2 overflow-y-auto"
-    placeholder="Search for properties..."
-    value={searchQuery}
-    onChange={e => {
-      const value = e.target.value;
-      const lines = value.split('\n');
-      if (lines.length <= 5) {
-        setSearchQuery(value);
-      } else {
-        setSearchQuery(lines.slice(0, 5).join('\n'));
-      }
-      // Auto-expand logic
-      const textarea = e.target as HTMLTextAreaElement;
-      textarea.style.height = '24px';
-      const maxHeight = 24 * 5;
-      textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
-    }}
-    onInput={e => {
-      const textarea = e.currentTarget;
-      textarea.style.height = '24px';
-      const maxHeight = 24 * 5;
-      textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
-    }}
-    onKeyDown={e => {
-      if (
-        e.key === 'Enter' &&
-        (searchQuery.match(/\n/g)?.length ?? 0) >= 4
-      ) {
-        e.preventDefault();
-      }
-    }}
-    onPaste={e => {
-      const paste = e.clipboardData.getData('text');
-      const currentLines = searchQuery.split('\n');
-      const pasteLines = paste.split('\n');
-      if (currentLines.length + pasteLines.length - 1 > 5) {
-        e.preventDefault();
-        const allowedLines = 5 - currentLines.length;
-        if (allowedLines > 0) {
-          const toPaste = pasteLines.slice(0, allowedLines).join('\n');
-          setSearchQuery(searchQuery + (searchQuery ? '\n' : '') + toPaste);
-        }
-      }
-    }}
-    rows={1}
-    style={{
-      lineHeight: '24px',
-      minHeight: '24px',
-      maxHeight: '120px', // 5 lines * 24px
-      resize: 'none',
-      overflowY: 'auto',
-      border: 'none',
-      background: 'transparent',
-      padding: 0,
-      margin: 0,
-      transition: 'height 0.15s',
-    }}
-    maxLength={1000}
-  />
-  {/* Search Button */}
-  <button
-    className={`ml-2 bg-primary text-white p-2 rounded-full transition-all shadow flex items-center justify-center ${
-      isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-90'
-    }`}
-    onClick={handleSearch}
-    disabled={isLoading || !searchQuery.trim()}
-    style={{ minWidth: 40, minHeight: 40 }}
-  >
-    {isLoading ? (
-      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-    ) : (
-      <AISearchIcon className="w-5 h-5" />
-    )}
-  </button>
-</div>
         </div>
       </section>
 
