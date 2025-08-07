@@ -13,13 +13,14 @@ import {
   mockGetContracts,
   mockGetUserFiles
 } from '../mocks/dashboardApi';
+import { progressTrackingService } from './progressTrackingService';
 
 // Use environment variable to determine if we're using mock data
 const USE_MOCK_DATA = true; // In production, this would be process.env.REACT_APP_USE_MOCK_DATA === 'true'
 
 // Dashboard Service Interface
 export interface DashboardServiceInterface {
-  getDashboardSummary(): Promise<ApiResponse<DashboardSummary>>;
+  getDashboardSummary(userId?: string): Promise<ApiResponse<DashboardSummary>>;
   getSavedProperties(): Promise<ApiResponse<SavedProperty[]>>;
   getViewings(): Promise<ApiResponse<PropertyViewing[]>>;
   getReferencingApplications(): Promise<ApiResponse<ReferencingApplication[]>>;
@@ -29,8 +30,114 @@ export interface DashboardServiceInterface {
 
 // Implementation using mock data for testing
 class MockDashboardService implements DashboardServiceInterface {
-  getDashboardSummary(): Promise<ApiResponse<DashboardSummary>> {
-    return mockGetDashboardSummary();
+  async getDashboardSummary(userId?: string): Promise<ApiResponse<DashboardSummary>> {
+    try {
+      // Get the mock data first
+      const mockResponse = await mockGetDashboardSummary();
+      
+      if (!mockResponse.success || !mockResponse.data) {
+        return mockResponse;
+      }
+      
+      // Get current user ID - use provided userId or try to get from localStorage
+      let currentUserId = userId || localStorage.getItem('currentUserId') || 'default-user';
+      
+      // If we're still using default-user, try to find the actual user ID from localStorage
+      if (currentUserId === 'default-user') {
+        // Look for any referencing keys that contain a real user ID
+        const allKeys = Object.keys(localStorage);
+        const referencingKeys = allKeys.filter(key => 
+          key.includes('referencing_') && 
+          key.includes('_formData') &&
+          !key.includes('default-user')
+        );
+        
+        if (referencingKeys.length > 0) {
+          // Extract user ID from the first referencing key
+          const firstKey = referencingKeys[0];
+          const match = firstKey.match(/referencing_(.+?)_formData/);
+          if (match && match[1]) {
+            currentUserId = match[1];
+            console.log('🔍 Dashboard: Found actual user ID from localStorage:', currentUserId);
+          }
+        }
+      }
+      
+      // Get real progress from localStorage using the same key format as ReferencingModal
+      const progressData = progressTrackingService.getProgress(currentUserId);
+      
+      console.log('📊 Dashboard: Retrieved progress data for user:', currentUserId, progressData);
+      console.log('🔍 Dashboard: Progress data details:', {
+        status: progressData.status,
+        progress: progressData.progress,
+        completedSteps: progressData.completedSteps,
+        totalSteps: progressData.totalSteps,
+        sections: progressData.sections
+      });
+      
+      // If progress is 0 but we have form data, clear the cache to force recalculation
+      if (progressData.progress === 0) {
+        const allKeys = Object.keys(localStorage);
+        const hasFormData = allKeys.some(key => 
+          key.includes('referencing_') && 
+          key.includes('_formData')
+        );
+        
+        if (hasFormData) {
+          console.log('🔄 Dashboard: Progress is 0 but form data exists, clearing cache to force recalculation');
+          // Clear the cached progress to force recalculation
+          localStorage.removeItem(`proptii_progress_${currentUserId}`);
+          localStorage.removeItem(`proptii_dashboard_progress_${currentUserId}`);
+          
+          // Get fresh progress data
+          const freshProgressData = progressTrackingService.getProgress(currentUserId);
+          console.log('📊 Dashboard: Fresh progress data:', freshProgressData);
+          
+          // Update the response with fresh data
+          mockResponse.data.referencing = {
+            ...mockResponse.data.referencing,
+            status: freshProgressData.status,
+            progress: freshProgressData.progress,
+            completedSteps: freshProgressData.completedSteps,
+            totalSteps: freshProgressData.totalSteps,
+            identity: freshProgressData.sections.identity,
+            employment: freshProgressData.sections.employment,
+            residential: freshProgressData.sections.residential,
+            financial: freshProgressData.sections.financial,
+            guarantor: freshProgressData.sections.guarantor,
+            creditCheck: freshProgressData.sections.creditCheck
+          };
+          
+          return mockResponse;
+        }
+      }
+      
+      // Update the mock data with real progress
+      const updatedData: DashboardSummary = {
+        ...mockResponse.data,
+        referencing: {
+          ...mockResponse.data.referencing,
+          status: progressData.status,
+          progress: progressData.progress,
+          completedSteps: progressData.completedSteps,
+          totalSteps: progressData.totalSteps,
+          identity: progressData.sections.identity,
+          employment: progressData.sections.employment,
+          residential: progressData.sections.residential,
+          financial: progressData.sections.financial,
+          guarantor: progressData.sections.guarantor,
+          creditCheck: progressData.sections.creditCheck
+        }
+      };
+      
+      return {
+        success: true,
+        data: updatedData
+      };
+    } catch (error) {
+      console.error('Error getting dashboard summary:', error);
+      return mockGetDashboardSummary();
+    }
   }
 
   getSavedProperties(): Promise<ApiResponse<SavedProperty[]>> {

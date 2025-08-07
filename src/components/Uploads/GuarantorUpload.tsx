@@ -19,8 +19,19 @@ const GuarantorUpload: React.FC<GuarantorUploadProps> = ({ updateFormData, formD
 
   // Load file from formData on mount
   useEffect(() => {
-    if (formData?.guarantor?.identityDocument?.dataUrl) {
-      setPreview(formData.guarantor.identityDocument.dataUrl);
+    if (formData?.guarantor?.identityDocument) {
+      // If it's a File object, create preview
+      if (formData.guarantor.identityDocument instanceof File) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreview(reader.result as string);
+        };
+        reader.readAsDataURL(formData.guarantor.identityDocument);
+      }
+      // If it's a StoredFile object (from localStorage), use dataUrl
+      else if (formData.guarantor.identityDocument.dataUrl) {
+        setPreview(formData.guarantor.identityDocument.dataUrl);
+      }
     }
   }, [formData]);
 
@@ -29,23 +40,14 @@ const GuarantorUpload: React.FC<GuarantorUploadProps> = ({ updateFormData, formD
       const file = event.target.files[0];
       setSelectedFile(file);
 
-      // Convert file to base64 for storage
+      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         const dataUrl = reader.result as string;
         setPreview(dataUrl);
 
-        // Create StoredFile object
-        const storedFile: StoredFile = {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          lastModified: file.lastModified,
-          dataUrl: dataUrl
-        };
-
-        // Update form data with stored file
-        updateFormData("guarantor", { identityDocument: storedFile });
+        // Update form data with actual File object (not StoredFile)
+        updateFormData("guarantor", { identityDocument: file });
       };
       reader.readAsDataURL(file);
     }
@@ -53,24 +55,36 @@ const GuarantorUpload: React.FC<GuarantorUploadProps> = ({ updateFormData, formD
 
   return (
     <div className="mt-8">
+      {/* Heading */}
       <h2 className="text-lg font-semibold mb-2">Guarantor Documents</h2>
+
+      {/* Label */}
       <label className="block text-gray-700 mb-2">
-        Guarantor's ID Document <span className="text-red-500">*</span>
+        Identity Document <span className="text-red-500">*</span>
       </label>
+
+      {/* Drag and Drop File Upload */}
       <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-white">
         <label
-          htmlFor="guarantor-proof-upload"
+          htmlFor="guarantor-identity-upload"
           className="cursor-pointer flex flex-col items-center justify-center"
         >
           {!preview ? (
             <>
+              {/* Upload Icon */}
               <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-blue-500 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
+
+              {/* Drag and Drop Text */}
               <p className="text-gray-600">Drag and drop or click to select</p>
+
+              {/* Accepted Formats */}
               <p className="text-gray-500 text-sm mt-1">
                 Accepted formats: <span className="font-semibold">.PDF, .DOC, .DOCX, .JPG, .JPEG, .PNG</span>
               </p>
+
+              {/* File Size Limit */}
               <p className="text-gray-500 text-sm">Maximum file size: 5.0 MB</p>
             </>
           ) : (
@@ -98,16 +112,20 @@ const GuarantorUpload: React.FC<GuarantorUploadProps> = ({ updateFormData, formD
             </div>
           )}
         </label>
+
+        {/* Hidden File Input */}
         <input
           type="file"
-          id="guarantor-proof-upload"
+          id="guarantor-identity-upload"
           className="hidden"
           accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
           onChange={handleFileChange}
         />
       </div>
+
+      {/* Helper Text */}
       <p className="text-gray-500 text-sm mt-2">
-        Please upload a clear copy of your guarantor's ID document
+        Please upload a clear copy of the guarantor's identity document
       </p>
     </div>
   );

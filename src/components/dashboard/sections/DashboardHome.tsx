@@ -21,6 +21,8 @@ import ImageIcon from '@mui/icons-material/Image';
 import NorthEastIcon from '@mui/icons-material/NorthEast';
 import { useDashboardData } from '../../../hooks/useDashboardData';
 import { useSavedProperties } from '../../../context/SavedPropertiesContext';
+import { useProgressSync } from '../../../hooks/useProgressSync';
+import { useAuth } from '../../../context/AuthContext';
 import { formatCurrency, formatDate, formatFileSize } from '../../../utils/formatters';
 
 
@@ -131,6 +133,25 @@ const DashboardHome: React.FC = () => {
   } = useDashboardData();
   
   const { savedProperties, getSavedPropertiesCount } = useSavedProperties();
+  const { user } = useAuth();
+  
+  // Sync progress with dashboard using auth context
+  const userId = user?.id || user?.email || 'default-user';
+  useProgressSync(userId);
+
+  // Debug logging to verify data communication
+  React.useEffect(() => {
+    if (dashboardSummary?.referencing) {
+      console.log('🏠 DashboardHome: Received referencing data:', {
+        userId,
+        progress: dashboardSummary.referencing.progress,
+        completedSteps: dashboardSummary.referencing.completedSteps,
+        totalSteps: dashboardSummary.referencing.totalSteps,
+        status: dashboardSummary.referencing.status,
+        sections: dashboardSummary.referencing
+      });
+    }
+  }, [dashboardSummary, userId]);
 
   const data = [
     { name: 'Total', value: dashboardSummary?.viewings.total || 0 },

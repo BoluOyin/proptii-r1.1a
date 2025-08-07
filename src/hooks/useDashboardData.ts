@@ -1,127 +1,88 @@
 import { useState, useEffect } from 'react';
-import { 
-  dashboardService, 
-  DashboardSummary, 
-  SavedProperty, 
-  PropertyViewing, 
-  ReferencingApplication, 
-  Contract, 
-  UserFile 
-} from '../services/dashboardService';
+import { dashboardService, DashboardSummary, SavedProperty, PropertyViewing, ReferencingApplication, Contract, UserFile } from '../services/dashboardService';
+import { useAuth } from '../context/AuthContext';
 
-interface DashboardData {
-  isLoading: boolean;
-  error: string | null;
-  dashboardSummary: DashboardSummary | null;
-  savedProperties: SavedProperty[];
-  viewings: PropertyViewing[];
-  upcomingViewings: PropertyViewing[];
-  pastViewings: PropertyViewing[];
-  referencingApplications: ReferencingApplication[];
-  contracts: Contract[];
-  files: UserFile[];
-  refreshData: () => Promise<void>;
-}
-
-/**
- * Custom hook for loading dashboard data
- * This centralizes data fetching across different dashboard sections
- */
-export const useDashboardData = (): DashboardData => {
+export const useDashboardData = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
-  const [savedProperties, setSavedProperties] = useState<SavedProperty[]>([]);
   const [viewings, setViewings] = useState<PropertyViewing[]>([]);
-  const [referencingApplications, setReferencingApplications] = useState<ReferencingApplication[]>([]);
-  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [upcomingViewings, setUpcomingViewings] = useState<PropertyViewing[]>([]);
   const [files, setFiles] = useState<UserFile[]>([]);
+  
+  const { user } = useAuth();
 
-  const fetchDashboardData = async () => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // Fetch all data in parallel for better performance
-      const [
-        dashboardResponse,
-        propertiesResponse,
-        viewingsResponse,
-        referencingResponse,
-        contractsResponse,
-        filesResponse
-      ] = await Promise.all([
-        dashboardService.getDashboardSummary(),
-        dashboardService.getSavedProperties(),
-        dashboardService.getViewings(),
-        dashboardService.getReferencingApplications(),
-        dashboardService.getContracts(),
-        dashboardService.getUserFiles()
-      ]);
-
-      if (dashboardResponse.success && dashboardResponse.data) {
-        setDashboardSummary(dashboardResponse.data);
-      } else if (!dashboardResponse.success) {
-        setError(dashboardResponse.error || 'Failed to fetch dashboard summary');
-      }
-
-      if (propertiesResponse.success && propertiesResponse.data) {
-        setSavedProperties(propertiesResponse.data);
-      } else if (!propertiesResponse.success) {
-        console.error('Error fetching properties:', propertiesResponse.error);
-      }
-
-      if (viewingsResponse.success && viewingsResponse.data) {
-        setViewings(viewingsResponse.data);
-      } else if (!viewingsResponse.success) {
-        console.error('Error fetching viewings:', viewingsResponse.error);
-      }
-
-      if (referencingResponse.success && referencingResponse.data) {
-        setReferencingApplications(referencingResponse.data);
-      } else if (!referencingResponse.success) {
-        console.error('Error fetching referencing applications:', referencingResponse.error);
-      }
-
-      if (contractsResponse.success && contractsResponse.data) {
-        setContracts(contractsResponse.data);
-      } else if (!contractsResponse.success) {
-        console.error('Error fetching contracts:', contractsResponse.error);
-      }
-
-      if (filesResponse.success && filesResponse.data) {
-        setFiles(filesResponse.data);
-      } else if (!filesResponse.success) {
-        console.error('Error fetching files:', filesResponse.error);
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      setError('An unexpected error occurred while fetching dashboard data');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Load data on initial mount
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    const fetchDashboardData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
 
-  // Filter viewings for convenience
-  const upcomingViewings = viewings.filter(viewing => viewing.status === 'upcoming');
-  const pastViewings = viewings.filter(viewing => viewing.status === 'completed');
+        // Get user ID for dashboard data
+        let userId = user?.id || user?.email || 'default-user';
+        
+        // If we're using default-user, try to find the actual user ID from localStorage
+        if (userId === 'default-user') {
+          const allKeys = Object.keys(localStorage);
+          const referencingKeys = allKeys.filter(key => 
+            key.includes('referencing_') && 
+            key.includes('_formData') &&
+            !key.includes('default-user')
+          );
+          
+          if (referencingKeys.length > 0) {
+            const firstKey = referencingKeys[0];
+            const match = firstKey.match(/referencing_(.+?)_formData/);
+            if (match && match[1]) {
+              userId = match[1];
+              console.log('🔍 DashboardData: Found actual user ID:', userId);
+            }
+          }
+        }
+        
+        // Fetch dashboard summary with user ID
+        const summaryResponse = await dashboardService.getDashboardSummary(userId);
+        if (summaryResponse.success && summaryResponse.data) {
+          setDashboardSummary(summaryResponse.data);
+        } else {
+          setError(summaryResponse.error || 'Failed to load dashboard summary');
+        }
+
+        // Fetch other data
+        const [viewingsResponse, filesResponse] = await Promise.all([
+          dashboardService.getViewings(),
+          dashboardService.getUserFiles()
+        ]);
+
+        if (viewingsResponse.success && viewingsResponse.data) {
+          setViewings(viewingsResponse.data);
+          // Filter upcoming viewings
+          const upcoming = viewingsResponse.data.filter(viewing => 
+            new Date(viewing.scheduledDate) > new Date()
+          );
+          setUpcomingViewings(upcoming);
+        }
+
+        if (filesResponse.success && filesResponse.data) {
+          setFiles(filesResponse.data);
+        }
+
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [user]);
 
   return {
     isLoading,
     error,
     dashboardSummary,
-    savedProperties,
     viewings,
     upcomingViewings,
-    pastViewings,
-    referencingApplications,
-    contracts,
-    files,
-    refreshData: fetchDashboardData
+    files
   };
 }; 

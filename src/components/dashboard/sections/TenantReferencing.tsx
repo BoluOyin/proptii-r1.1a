@@ -7,6 +7,8 @@ import {
   styled,
 } from '@mui/material';
 import { useDashboardData } from '../../../hooks/useDashboardData';
+import { useProgressSync } from '../../../hooks/useProgressSync';
+import { useAuth } from '../../../context/AuthContext';
 import zIndex from "@mui/material/styles/zIndex";
 
 interface CheckItem {
@@ -177,10 +179,29 @@ const TenantReferencing: React.FC = () => {
     dashboardSummary,
 
   } = useDashboardData();
+  
+  const { user } = useAuth();
+  
+  // Sync progress with dashboard using auth context
+  const userId = user?.id || user?.email || 'default-user';
+  useProgressSync(userId);
 
 
   const referencingProgress = (dashboardSummary?.referencing.progress || 0); // This should match the percentage in DashboardHome.tsx
 
+  // Debug logging to verify data communication
+  React.useEffect(() => {
+    if (dashboardSummary?.referencing) {
+      console.log('📋 TenantReferencing: Received referencing data:', {
+        userId,
+        progress: dashboardSummary.referencing.progress,
+        completedSteps: dashboardSummary.referencing.completedSteps,
+        totalSteps: dashboardSummary.referencing.totalSteps,
+        status: dashboardSummary.referencing.status,
+        sections: dashboardSummary.referencing
+      });
+    }
+  }, [dashboardSummary, userId]);
 
   const completedSteps = dashboardSummary?.referencing.completedSteps || 0;
   const totalSteps = dashboardSummary?.referencing.totalSteps || 1; // Avoid division by zero

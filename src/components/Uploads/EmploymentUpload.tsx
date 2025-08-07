@@ -19,8 +19,19 @@ const EmploymentUpload: React.FC<EmploymentUploadProps> = ({ updateFormData, for
 
   // Load file from formData on mount
   useEffect(() => {
-    if (formData?.employment?.proofDocument?.dataUrl) {
-      setPreview(formData.employment.proofDocument.dataUrl);
+    if (formData?.employment?.proofDocument) {
+      // If it's a File object, create preview
+      if (formData.employment.proofDocument instanceof File) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreview(reader.result as string);
+        };
+        reader.readAsDataURL(formData.employment.proofDocument);
+      }
+      // If it's a StoredFile object (from localStorage), use dataUrl
+      else if (formData.employment.proofDocument.dataUrl) {
+        setPreview(formData.employment.proofDocument.dataUrl);
+      }
     }
   }, [formData]);
 
@@ -29,23 +40,14 @@ const EmploymentUpload: React.FC<EmploymentUploadProps> = ({ updateFormData, for
       const file = event.target.files[0];
       setSelectedFile(file);
 
-      // Convert file to base64 for storage
+      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         const dataUrl = reader.result as string;
         setPreview(dataUrl);
 
-        // Create StoredFile object
-        const storedFile: StoredFile = {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          lastModified: file.lastModified,
-          dataUrl: dataUrl
-        };
-
-        // Update form data with stored file
-        updateFormData("employment", { proofDocument: storedFile });
+        // Update form data with actual File object (not StoredFile)
+        updateFormData("employment", { proofDocument: file });
       };
       reader.readAsDataURL(file);
     }

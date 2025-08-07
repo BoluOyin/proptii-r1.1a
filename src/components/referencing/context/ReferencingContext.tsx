@@ -1,18 +1,12 @@
-<<<<<<< HEAD
-import React, { createContext, useReducer, useContext, ReactNode, useEffect, useCallback } from 'react';
-=======
 import React, { createContext, useReducer, useContext, ReactNode, useEffect, useCallback, useState } from 'react';
->>>>>>> upstream/feature/ai-search-listings-agents
 import { FormData, FormSection, ReferencingState as FormReferencingState, ReferencingAction as FormReferencingAction, ReferencingFormData } from '../../../types/referencing';
 import { saveToLocalStorage, loadFromLocalStorage, saveDraft } from '../../../utils/localStorage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import * as referencingService from '../../../services/referencingService';
 import { isAzureConfigured } from '../../../config/azure';
 import { uploadToAzureStorage } from '../../../services/storageService';
-<<<<<<< HEAD
-=======
+import { progressTrackingService } from '../../../services/progressTrackingService';
 import * as yup from 'yup';
->>>>>>> upstream/feature/ai-search-listings-agents
 
 // Define the state type
 interface ReferencingState {
@@ -57,12 +51,6 @@ interface ReferencingContextType {
   saveAsDraft: (name: string) => Promise<boolean>;
   setPropertyId: (id: string) => void;
   uploadDocument: (section: FormSection, field: string, file: File) => Promise<string | null>;
-<<<<<<< HEAD
-}
-
-// Create the context
-const ReferencingContext = createContext<ReferencingContextType | null>(null);
-=======
   formData: FormData;
   errors: {
     [K in keyof FormData]?: {
@@ -74,7 +62,6 @@ const ReferencingContext = createContext<ReferencingContextType | null>(null);
 
 // Create the context
 const ReferencingContext = createContext<ReferencingContextType | undefined>(undefined);
->>>>>>> upstream/feature/ai-search-listings-agents
 
 // Initial state
 const initialFormData: FormData = {
@@ -109,22 +96,20 @@ const initialFormData: FormData = {
     proofDocument: null
   },
   financial: {
+    monthlyIncome: '',
     proofOfIncomeType: '',
     proofOfIncomeDocument: null,
     useOpenBanking: false,
     isConnectedToOpenBanking: false
   },
   guarantor: {
-    firstName: '',
-    lastName: '',
+    fullName: '',
     email: '',
-    phoneNumber: '',
     address: '',
     identityDocument: null
   },
   creditCheck: {
-    hasAgreedToCheck: false,
-    additionalDocument: null
+    hasAgreedToCheck: false
   }
 };
 
@@ -296,30 +281,11 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
   // Check if we should use API or localStorage
   const useApi = isAzureConfigured();
   
-  // Initialize form data from localStorage or API
+  // Initialize form data from localStorage
   useEffect(() => {
     const loadInitialData = async () => {
-      if (useApi && state.applicationId) {
-        try {
-          // Try to load data from API
-          const response = await referencingService.getApplication(state.applicationId);
-          if (response.success && response.data) {
-            // Convert API data to FormData format
-            const formData = convertApiDataToFormData(response.data);
-            dispatch({ type: 'SET_FORM_DATA', payload: formData });
-          } else {
-            // If API fails, fall back to localStorage
-            dispatch({ type: 'SET_FORM_DATA', payload: storedFormData });
-          }
-        } catch (error) {
-          console.error('Error loading application data:', error);
-          // Fall back to localStorage
-          dispatch({ type: 'SET_FORM_DATA', payload: storedFormData });
-        }
-      } else {
-        // Use localStorage data
-        dispatch({ type: 'SET_FORM_DATA', payload: storedFormData });
-      }
+      // Use localStorage data for now since API methods are not fully implemented
+      dispatch({ type: 'SET_FORM_DATA', payload: storedFormData });
       
       if (storedLastSaved) {
         dispatch({ type: 'SET_LAST_SAVED', payload: storedLastSaved.getTime() });
@@ -327,63 +293,47 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     };
     
     loadInitialData();
-  }, [storedFormData, storedLastSaved, state.applicationId, useApi]);
+  }, [storedFormData, storedLastSaved]);
 
-  // Create application if needed
-  useEffect(() => {
-    const createApplicationIfNeeded = async () => {
-      if (useApi && state.propertyId && !state.applicationId) {
-        try {
-          const response = await referencingService.createApplication(state.propertyId);
-          if (response.success && response.data?.applicationId) {
-            dispatch({ type: 'SET_APPLICATION_ID', payload: response.data.applicationId });
-          }
-        } catch (error) {
-          console.error('Error creating application:', error);
-        }
-      }
-    };
-    
-    createApplicationIfNeeded();
-  }, [state.propertyId, state.applicationId, useApi]);
-
-  // Update form data
+  // Update form data and track progress
   const updateFormData = useCallback((section: FormSection, data: any) => {
     dispatch({
       type: 'UPDATE_FORM_DATA',
       payload: { section, data }
     });
     updateSection(section, data);
-  }, [updateSection]);
+    
+    // Update progress tracking in localStorage for dashboard
+    const updatedFormData = {
+      ...state.formData,
+      [section]: {
+        ...state.formData[section],
+        ...data
+      }
+    };
+    
+    // Save progress data for dashboard tracking
+    const progressData = progressTrackingService.calculateProgress(updatedFormData);
+    const userId = localStorage.getItem('currentUserId') || 'default-user';
+    const progressKey = `progress_${userId}`;
+    saveToLocalStorage(progressKey, progressData);
+    
+    // Debug logging
+    console.log('📝 ReferencingContext: Updated form data for section:', section, data);
+    console.log('📊 ReferencingContext: Calculated progress:', progressData);
+    console.log('💾 ReferencingContext: Saved progress to key:', progressKey);
+    console.log('📋 ReferencingContext: Current form data state:', updatedFormData);
+  }, [updateSection, state.formData]);
 
-  // Save form data to API or localStorage
+  // Save form data to localStorage
   const saveFormData = useCallback(async (): Promise<boolean> => {
     if (!state.propertyId) return false;
     
     dispatch({ type: 'SET_IS_SAVING', payload: true });
     
     try {
-      if (useApi && state.applicationId) {
-        // Save to API
-        const currentSection = ['identity', 'employment', 'residential', 'financial', 'guarantor', 'creditCheck'][state.currentStep] as FormSection;
-        const sectionData = state.formData[currentSection];
-        
-        // Convert FormData to API format (remove File objects)
-        const apiData = convertFormSectionToApiFormat(currentSection, sectionData);
-        
-        const response = await referencingService.saveSectionData(
-          state.applicationId,
-          currentSection,
-          apiData
-        );
-        
-        if (!response.success) {
-          throw new Error(response.error || 'Failed to save data');
-        }
-      } else {
-        // Save to localStorage
-        saveToLocalStorage(`form_${state.propertyId}`, state.formData);
-      }
+      // Save to localStorage for now
+      saveToLocalStorage(`form_${state.propertyId}`, state.formData);
       
       // Update last saved timestamp
       const timestamp = Date.now();
@@ -396,7 +346,7 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     } finally {
       dispatch({ type: 'SET_IS_SAVING', payload: false });
     }
-  }, [state.propertyId, state.formData, state.currentStep, state.applicationId, useApi]);
+  }, [state.propertyId, state.formData]);
 
   // Save current step
   const saveCurrentStep = useCallback(async (): Promise<boolean> => {
@@ -412,50 +362,28 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     if (!file) return null;
     
     try {
-      if (useApi && state.applicationId) {
-        // Upload to API
-        const response = await referencingService.uploadDocument(
-          state.applicationId,
-          section,
-          file,
-          field,
-          (progress) => {
-            dispatch({
-              type: 'SET_UPLOAD_PROGRESS',
-              payload: { field, progress }
-            });
-          }
-        );
-        
-        if (response.success && response.data) {
-          return response.data.fileUrl;
+      // Upload directly to Azure Storage for now
+      const result = await uploadToAzureStorage(
+        file,
+        `${section}/${field}`,
+        (progress: { percentage: number }) => {
+          dispatch({
+            type: 'SET_UPLOAD_PROGRESS',
+            payload: { field, progress: progress.percentage }
+          });
         }
-        
-        throw new Error(response.error || 'Failed to upload document');
-      } else {
-        // Upload directly to Azure Storage
-        const result = await uploadToAzureStorage(
-          file,
-          `${section}/${field}`,
-          (progress) => {
-            dispatch({
-              type: 'SET_UPLOAD_PROGRESS',
-              payload: { field, progress: progress.percentage }
-            });
-          }
-        );
-        
-        if (result.success && result.url) {
-          return result.url;
-        }
-        
-        throw new Error(result.error || 'Failed to upload document');
+      );
+      
+      if (result.success && result.url) {
+        return result.url;
       }
+      
+      throw new Error(result.error || 'Failed to upload document');
     } catch (error) {
       console.error(`Error uploading ${field} document:`, error);
       return null;
     }
-  }, [state.applicationId, useApi]);
+  }, []);
 
   // Submit application
   const submitApplication = useCallback(async (): Promise<boolean> => {
@@ -466,25 +394,14 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
       // Save current step first
       await saveFormData();
       
-      if (useApi && state.applicationId) {
-        // Submit to API
-        const response = await referencingService.submitApplication(state.applicationId);
-        
-        if (!response.success) {
-          throw new Error(response.error || 'Failed to submit application');
-        }
-        
-        return true;
-      } else {
-        // Simulate API call
-<<<<<<< HEAD
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        return true;
-=======
+      // Simulate API call for now
       await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Mark as submitted in localStorage
+      const userId = localStorage.getItem('currentUserId') || 'default-user';
+      localStorage.setItem(`referencing_${userId}_submitted`, 'true');
+      
       return true;
->>>>>>> upstream/feature/ai-search-listings-agents
-      }
     } catch (error) {
       console.error('Error submitting application:', error);
       
@@ -500,7 +417,7 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     } finally {
       dispatch({ type: 'SET_IS_SUBMITTING', payload: false });
     }
-  }, [saveFormData, state.applicationId, useApi]);
+  }, [saveFormData]);
 
   // Navigate to the next step
   const nextStep = useCallback(() => {
@@ -520,27 +437,14 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
   // Save as draft
   const saveAsDraft = useCallback(async (name: string): Promise<boolean> => {
     try {
-      if (useApi && state.applicationId) {
-        // Save to API
-        const apiData = convertFormDataToApiFormat(state.formData);
-        
-        const response = await referencingService.saveDraft(
-          state.applicationId,
-          name,
-          apiData
-        );
-        
-        return response.success;
-      } else {
-        // Save to localStorage
-        saveLocalDraft(name);
-        return true;
-      }
+      // Save to localStorage for now
+      saveLocalDraft(name);
+      return true;
     } catch (error) {
       console.error('Error saving draft:', error);
       return false;
     }
-  }, [saveLocalDraft, state.applicationId, state.formData, useApi]);
+  }, [saveLocalDraft]);
 
   // Set property ID
   const setPropertyId = useCallback((id: string) => {
@@ -597,10 +501,8 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     
     if (formData.creditCheck) {
       apiData.creditCheck = {
-        ...formData.creditCheck,
-        additionalDocumentId: formData.creditCheck.additionalDocument ? 'pending-upload' : undefined
+        ...formData.creditCheck
       };
-      delete (apiData.creditCheck as any).additionalDocument;
     }
     
     return apiData;
@@ -686,8 +588,6 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     return formData;
   };
 
-<<<<<<< HEAD
-=======
   // Validation schemas
   const employmentSchema = yup.object().shape({
     employmentStatus: yup.string().required('Employment status is required'),
@@ -730,7 +630,7 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
           type: 'SET_ERROR',
           payload: {
             section,
-            error: newErrors
+            error: JSON.stringify(newErrors)
           }
         });
       }
@@ -738,7 +638,6 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
     }
   }, [state.formData]);
 
->>>>>>> upstream/feature/ai-search-listings-agents
   return (
     <ReferencingContext.Provider
       value={{
@@ -752,14 +651,10 @@ export const ReferencingProvider: React.FC<ReferencingProviderProps> = ({
         setCurrentStep,
         saveAsDraft,
         setPropertyId,
-<<<<<<< HEAD
-        uploadDocument
-=======
         uploadDocument,
         formData: state.formData,
         errors: state.errors,
         validateSection
->>>>>>> upstream/feature/ai-search-listings-agents
       }}
     >
       {children}
@@ -774,10 +669,6 @@ export const useReferencing = (): ReferencingContextType => {
     throw new Error('useReferencing must be used within a ReferencingProvider');
   }
   return context;
-<<<<<<< HEAD
 };
-=======
-}; 
->>>>>>> upstream/feature/ai-search-listings-agents
 
 export default ReferencingContext; 

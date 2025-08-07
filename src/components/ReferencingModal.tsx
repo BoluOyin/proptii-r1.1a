@@ -288,8 +288,73 @@ interface UploadProps {
   formData: FormData;
 }
 
+// Storage quota management utilities
+const getStorageSize = (): number => {
+  let total = 0;
+  for (let key in localStorage) {
+    if (localStorage.hasOwnProperty(key)) {
+      total += localStorage[key].length + key.length;
+    }
+  }
+  return total;
+};
+
+const clearOldStorage = (): void => {
+  const keys = Object.keys(localStorage);
+  const referencingKeys = keys.filter(key => key.startsWith('referencing_'));
+  
+  // Sort by timestamp (if available) and remove oldest entries
+  const sortedKeys = referencingKeys.sort((a, b) => {
+    try {
+      const aData = JSON.parse(localStorage.getItem(a) || '{}');
+      const bData = JSON.parse(localStorage.getItem(b) || '{}');
+      return (aData.timestamp || 0) - (bData.timestamp || 0);
+    } catch {
+      return 0;
+    }
+  });
+
+  // Remove oldest entries if we have more than 3
+  if (sortedKeys.length > 3) {
+    const keysToRemove = sortedKeys.slice(0, sortedKeys.length - 3);
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    console.log(`Cleared ${keysToRemove.length} old storage entries`);
+  }
+};
+
+const safeSetItem = (key: string, value: string): boolean => {
+  try {
+    // Check if we're approaching quota limit
+    const currentSize = getStorageSize();
+    const newItemSize = key.length + value.length;
+    
+    // If adding this item would exceed 4MB (conservative limit), clear old data
+    if (currentSize + newItemSize > 4 * 1024 * 1024) {
+      clearOldStorage();
+    }
+    
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'QuotaExceededError') {
+      console.warn('Storage quota exceeded, attempting cleanup...');
+      clearOldStorage();
+      
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch (retryError) {
+        console.error('Failed to save after cleanup:', retryError);
+        return false;
+      }
+    }
+    console.error('Storage error:', error);
+    return false;
+  }
+};
+
 // Ultra-fast image compression with minimal quality for speed
-const compressImage = (file: File, maxSizeKB: number = 150): Promise<File> => {
+const compressImage = (file: File, maxSizeKB: number = 100): Promise<File> => {
   return new Promise((resolve) => {
     // Check if file is already small enough
     if (file.size <= maxSizeKB * 1024) {
@@ -334,7 +399,7 @@ const compressImage = (file: File, maxSizeKB: number = 150): Promise<File> => {
       ctx?.drawImage(img, 0, 0, width, height);
 
       // Single-pass compression for speed
-      const quality = 0.4; // Very aggressive quality for speed
+      const quality = 0.3; // More aggressive quality for smaller files
 
       canvas.toBlob((blob) => {
         if (blob) {
@@ -492,91 +557,45 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
   };
 
   // Optimized updateFormData with reduced localStorage operations
-  const updateFormData = async (step: keyof FormData | string, data: Partial<FormData[keyof FormData]>) => {
-    let processedData: any = { ...data };
-    let hasFilesToProcess = false;
-    let fileProcessingPromises: Promise<void>[] = [];
-
-    // Batch file processing operations
-    const processFiles = async () => {
-      // Check and process file uploads in parallel
-      if ('identityProof' in data && (data as any).identityProof instanceof File) {
-        hasFilesToProcess = true;
-        fileProcessingPromises.push(
-          processFileUpload((data as any).identityProof).then(result => {
-            (processedData as any).identityProof = result;
-          })
-        );
-      }
-
-      if ('proofDocument' in data && (data as any).proofDocument instanceof File) {
-        hasFilesToProcess = true;
-        fileProcessingPromises.push(
-          processFileUpload((data as any).proofDocument).then(result => {
-            (processedData as any).proofDocument = result;
-          })
-        );
-      }
-
-      if ('identityDocument' in data && (data as any).identityDocument instanceof File) {
-        hasFilesToProcess = true;
-        fileProcessingPromises.push(
-          processFileUpload((data as any).identityDocument).then(result => {
-            (processedData as any).identityDocument = result;
-          })
-        );
-      }
-
-      if ('proofOfIncomeDocument' in data && (data as any).proofOfIncomeDocument instanceof File) {
-        hasFilesToProcess = true;
-        fileProcessingPromises.push(
-          processFileUpload((data as any).proofOfIncomeDocument).then(result => {
-            (processedData as any).proofOfIncomeDocument = result;
-          })
-        );
-      }
-
-      if (fileProcessingPromises.length > 0) {
-        setIsProcessingFile(true);
-        toast.loading('Processing files...', { id: 'file-processing' });
-
-        try {
-          await Promise.all(fileProcessingPromises);
-          toast.dismiss('file-processing');
-          toast.success('Files processed successfully!');
-        } catch (error) {
-          console.error('Error processing files:', error);
-          toast.error('Failed to process files. Please try again.');
-          setIsProcessingFile(false);
-          toast.dismiss('file-processing');
-          return;
-        }
-
-        setIsProcessingFile(false);
-      }
-    };
-
-    await processFiles();
-
+  const updateFormData = (step: keyof FormData | string, data: Partial<FormData[keyof FormData]>) => {
     setFormData(prev => {
       const updated = {
         ...prev,
         [step]: {
           ...prev[step as keyof FormData],
-          ...processedData
+          ...data // Directly use the incoming data, which should contain File objects for uploads
         }
       };
 
       // Ultra-fast localStorage save using requestIdleCallback for better performance
-      if (user?.id) {
+      if (user?.id || user?.email) {
+        const saveToStorage = async () => {
+          try {
+            const storedFormData = await convertFormDataToStored(updated);
+            const userId = user?.id || user?.email;
+            const key = `referencing_${userId}_formData`;
+            const value = JSON.stringify({
+              ...storedFormData,
+              timestamp: Date.now() // Add timestamp for cleanup
+            });
+            
+            const success = safeSetItem(key, value);
+            if (!success) {
+              console.warn('Failed to save to localStorage due to quota limits');
+            }
+          } catch (error) {
+            console.error('Error saving to localStorage:', error);
+          }
+        };
+
         if (typeof window.requestIdleCallback !== 'undefined') {
           requestIdleCallback(() => {
-            localStorage.setItem(`referencing_${user.id}_formData`, JSON.stringify(updated));
+            saveToStorage();
           });
         } else {
           // Fallback for browsers without requestIdleCallback
           setTimeout(() => {
-            localStorage.setItem(`referencing_${user.id}_formData`, JSON.stringify(updated));
+            saveToStorage();
           }, 0);
         }
       }
@@ -767,26 +786,97 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
     }
   }, [user]);
 
+  // Convert FormData to StoredFormData by converting File to StoredFile
+  const convertFormDataToStored = async (formData: FormData): Promise<StoredFormData> => {
+    const convertFileToStored = async (file: File | null): Promise<StoredFile | null> => {
+      if (!file) return null;
+      return await fileToStoredFile(file);
+    };
+
+    return {
+      identity: {
+        ...formData.identity,
+        identityProof: await convertFileToStored(formData.identity.identityProof)
+      },
+      employment: {
+        ...formData.employment,
+        proofDocument: await convertFileToStored(formData.employment.proofDocument)
+      },
+      residential: {
+        ...formData.residential,
+        proofDocument: await convertFileToStored(formData.residential.proofDocument)
+      },
+      financial: {
+        ...formData.financial,
+        proofOfIncomeDocument: await convertFileToStored(formData.financial.proofOfIncomeDocument)
+      },
+      guarantor: {
+        ...formData.guarantor,
+        identityDocument: await convertFileToStored(formData.guarantor.identityDocument)
+      },
+      creditCheck: formData.creditCheck,
+      agentDetails: formData.agentDetails
+    };
+  };
+
+  // Convert StoredFormData back to FormData by converting StoredFile to File
+  const convertStoredToFormData = (storedData: StoredFormData): FormData => {
+    return {
+      identity: {
+        ...storedData.identity,
+        identityProof: storedData.identity.identityProof ? base64ToFile(storedData.identity.identityProof) : null
+      },
+      employment: {
+        ...storedData.employment,
+        proofDocument: storedData.employment.proofDocument ? base64ToFile(storedData.employment.proofDocument) : null
+      },
+      residential: {
+        ...storedData.residential,
+        proofDocument: storedData.residential.proofDocument ? base64ToFile(storedData.residential.proofDocument) : null
+      },
+      financial: {
+        ...storedData.financial,
+        proofOfIncomeDocument: storedData.financial.proofOfIncomeDocument ? base64ToFile(storedData.financial.proofOfIncomeDocument) : null
+      },
+      guarantor: {
+        ...storedData.guarantor,
+        identityDocument: storedData.guarantor.identityDocument ? base64ToFile(storedData.guarantor.identityDocument) : null
+      },
+      creditCheck: storedData.creditCheck,
+      agentDetails: storedData.agentDetails
+    };
+  };
+
   // Load stored data on mount
   useEffect(() => {
-    if (user?.id) {
+    const userId = user?.id || user?.email;
+    if (userId) {
       try {
-        // Don't load step status from localStorage - let it be calculated from formData
-
+        console.log('🔍 Loading referencing data for user:', userId);
+        
         // Load current step
-        const savedStep = localStorage.getItem(`referencing_${user.id}_currentStep`);
+        const savedStep = localStorage.getItem(`referencing_${userId}_currentStep`);
         if (savedStep) {
+          console.log('📋 Loading saved step:', savedStep);
           setCurrentStep(parseInt(savedStep, 10));
         }
 
         // Load entire form data at once
-        const savedFormData = localStorage.getItem(`referencing_${user.id}_formData`);
+        const savedFormData = localStorage.getItem(`referencing_${userId}_formData`);
         if (savedFormData) {
+          console.log('📄 Loading saved form data');
           const parsedData = JSON.parse(savedFormData);
+          
+          // Convert StoredFormData back to FormData
+          const convertedData = convertStoredToFormData(parsedData);
+          console.log('🔄 Converted stored data to form data');
+          
           setFormData(prev => ({
             ...prev,
-            ...parsedData
+            ...convertedData
           }));
+        } else {
+          console.log('📝 No saved form data found');
         }
 
       } catch (e) {
@@ -800,54 +890,89 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
     try {
       setIsSaving(true);
 
-      if (!user?.id) {
+      const userId = user?.id || user?.email;
+      if (!userId) {
         throw new Error('No user found. Please login again.');
       }
 
-      // Save current step to local storage
-      localStorage.setItem(`referencing_${user.id}_currentStep`, currentStep.toString());
-      localStorage.setItem(`referencing_${user.id}_formData`, JSON.stringify(formData));
-      localStorage.setItem(`referencing_${user.id}_stepStatus`, JSON.stringify(stepStatus));
+      console.log('💾 Saving referencing data for user:', userId);
+
+      // Convert FormData to StoredFormData for localStorage
+      const storedFormData = await convertFormDataToStored(formData);
+      
+      // Save current step to local storage (this always works)
+      localStorage.setItem(`referencing_${userId}_currentStep`, currentStep.toString());
+      
+      // Save form data with quota management
+      const formDataKey = `referencing_${userId}_formData`;
+      const formDataValue = JSON.stringify({
+        ...storedFormData,
+        timestamp: Date.now() // Add timestamp for cleanup
+      });
+      
+      const formDataSuccess = safeSetItem(formDataKey, formDataValue);
+      
+      // Save step status
+      const stepStatusKey = `referencing_${userId}_stepStatus`;
+      const stepStatusValue = JSON.stringify(stepStatus);
+      const stepStatusSuccess = safeSetItem(stepStatusKey, stepStatusValue);
+
+      if (formDataSuccess && stepStatusSuccess) {
+        console.log('✅ Data saved to localStorage successfully');
+      } else {
+        console.warn('⚠️ Some data failed to save due to quota limits');
+      }
 
       // Get current section data
       const section = getCurrentSection();
       if (!section) {
+        console.log('⏭️ Skipping API save for credit check step');
         return; // Skip saving for credit check step
       }
 
       const currentSectionData = {
         ...formData[section],
-        userId: user.id
+        userId: userId
       };
 
-      // Save to Cosmos DB based on current step
-      let saveResult;
-      switch (currentStep) {
-        case 1:
-          saveResult = await referencingService.saveIdentityData(currentSectionData);
-          break;
-        case 2:
-          saveResult = await referencingService.saveEmploymentData(currentSectionData);
-          break;
-        case 3:
-          saveResult = await referencingService.saveResidentialData(currentSectionData);
-          break;
-        case 4:
-          saveResult = await referencingService.saveFinancialData(currentSectionData);
-          break;
-        case 5:
-          saveResult = await referencingService.saveGuarantorData(currentSectionData);
-          break;
-        // case 6: // Credit check step commented out
-        case 7:
-          saveResult = await referencingService.saveAgentDetailsData(currentSectionData);
-          break;
-        default:
-          saveResult = { success: true }; // Credit check step doesn't need saving
-      }
+      // Try to save to API, but don't fail if it doesn't work
+      try {
+        console.log('🌐 Attempting to save to API for section:', section);
+        
+        // Save to Cosmos DB based on current step
+        let saveResult;
+        switch (currentStep) {
+          case 1:
+            saveResult = await referencingService.saveIdentityData(currentSectionData);
+            break;
+          case 2:
+            saveResult = await referencingService.saveEmploymentData(currentSectionData);
+            break;
+          case 3:
+            saveResult = await referencingService.saveResidentialData(currentSectionData);
+            break;
+          case 4:
+            saveResult = await referencingService.saveFinancialData(currentSectionData);
+            break;
+          case 5:
+            saveResult = await referencingService.saveGuarantorData(currentSectionData);
+            break;
+          // case 6: // Credit check step commented out
+          case 7:
+            saveResult = await referencingService.saveAgentDetailsData(currentSectionData);
+            break;
+          default:
+            saveResult = { success: true }; // Credit check step doesn't need saving
+        }
 
-      if (!saveResult.success) {
-        throw new Error(saveResult.error || 'Failed to save data');
+        if (saveResult.success) {
+          console.log('✅ Data saved to API successfully');
+        } else {
+          console.warn('⚠️ API save failed but localStorage save succeeded:', saveResult.error);
+        }
+      } catch (apiError) {
+        console.warn('⚠️ API save failed but localStorage save succeeded:', apiError);
+        // Don't throw the error - localStorage save was successful
       }
 
       // Update last saved timestamp
@@ -898,13 +1023,35 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
 
   // Add auto-save on form updates
   useEffect(() => {
-    if (user?.id) {
-      // Save form data whenever it changes
-      localStorage.setItem(`referencing_${user.id}_formData`, JSON.stringify(formData));
-      // Save step status
-      localStorage.setItem(`referencing_${user.id}_stepStatus`, JSON.stringify(stepStatus));
-      // Save current step
-      localStorage.setItem(`referencing_${user.id}_currentStep`, currentStep.toString());
+    const userId = user?.id || user?.email;
+    if (userId) {
+      // Convert FormData to StoredFormData for localStorage
+      convertFormDataToStored(formData).then(storedFormData => {
+        // Save form data whenever it changes with quota management
+        const formDataKey = `referencing_${userId}_formData`;
+        const formDataValue = JSON.stringify({
+          ...storedFormData,
+          timestamp: Date.now() // Add timestamp for cleanup
+        });
+        
+        const formDataSuccess = safeSetItem(formDataKey, formDataValue);
+        
+        // Save step status
+        const stepStatusKey = `referencing_${userId}_stepStatus`;
+        const stepStatusValue = JSON.stringify(stepStatus);
+        const stepStatusSuccess = safeSetItem(stepStatusKey, stepStatusValue);
+        
+        // Save current step
+        localStorage.setItem(`referencing_${userId}_currentStep`, currentStep.toString());
+        
+        if (formDataSuccess && stepStatusSuccess) {
+          console.log('🔄 Auto-saved form data for user:', userId);
+        } else {
+          console.warn('⚠️ Auto-save partially failed due to quota limits');
+        }
+      }).catch(error => {
+        console.error('Error converting form data for auto-save:', error);
+      });
     }
   }, [formData, stepStatus, currentStep, user]);
 
@@ -963,7 +1110,7 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
     try {
       setIsSubmitting(true);
 
-      const userId = user?.id;
+      const userId = user?.id || user?.email;
 
       if (!userId) {
         throw new Error('User ID is required for submission');
@@ -1062,14 +1209,13 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
       setShowSuccessModal(false);
       
       // Clear form data from localStorage if user is logged in
-      if (user?.id) {
-        const keysToRemove = [
-          `referencing_${user.id}_formData`,
-          `referencing_${user.id}_stepStatus`,
-          `referencing_${user.id}_currentStep`,
-          `referencing_${user.id}_submitted`
-        ];
-        keysToRemove.forEach(key => localStorage.removeItem(key));
+      const userId = user?.id || user?.email;
+      if (userId) {
+        // Clear all referencing data for this user
+        const keys = Object.keys(localStorage);
+        const userKeys = keys.filter(key => key.startsWith(`referencing_${userId}_`));
+        userKeys.forEach(key => localStorage.removeItem(key));
+        console.log(`🧹 Cleared ${userKeys.length} storage entries for user: ${userId}`);
       }
       
       // Close the main modal first
@@ -1134,17 +1280,15 @@ const ReferencingModal: React.FC<ReferencingModalProps> = ({ isOpen, onClose, on
 
   // Update cleanup effect
   useEffect(() => {
-    if (!isOpen && user?.id) {
-      const isSubmitted = localStorage.getItem(`referencing_${user.id}_submitted`) === 'true';
+    const userId = user?.id || user?.email;
+    if (!isOpen && userId) {
+      const isSubmitted = localStorage.getItem(`referencing_${userId}_submitted`) === 'true';
       if (isSubmitted) {
         // Clear storage only if the form was successfully submitted
-        const keysToRemove = [
-          `referencing_${user.id}_formData`,
-          `referencing_${user.id}_stepStatus`,
-          `referencing_${user.id}_currentStep`,
-          `referencing_${user.id}_submitted`
-        ];
-        keysToRemove.forEach(key => localStorage.removeItem(key));
+        const keys = Object.keys(localStorage);
+        const userKeys = keys.filter(key => key.startsWith(`referencing_${userId}_`));
+        userKeys.forEach(key => localStorage.removeItem(key));
+        console.log(`🧹 Cleanup: Cleared ${userKeys.length} storage entries for submitted user: ${userId}`);
       }
     }
   }, [isOpen, user]);

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { saveToLocalStorage, loadFromLocalStorage } from '../utils/localStorage';
 
 interface FormData {
   fullName: string;
@@ -14,9 +15,17 @@ interface FormData {
 }
 
 const ReferencingForm = () => {
-  const { user } = useAuth();
-  const [formData, setFormData] = useState<FormData>({
-    fullName: user?.name || '',
+  const { user, isLoading } = useAuth();
+  
+  // Generate a unique storage key for this form
+  const getStorageKey = () => {
+    const userId = user?.id || user?.email || 'anonymous';
+    return `referencing_form_${userId}`;
+  };
+
+  // Default form data
+  const getDefaultFormData = (): FormData => ({
+    fullName: user?.name || user?.givenName || '',
     email: user?.email || '',
     phone: '',
     currentAddress: '',
@@ -27,9 +36,58 @@ const ReferencingForm = () => {
     additionalInfo: '',
   });
 
+  const [formData, setFormData] = useState<FormData>(getDefaultFormData());
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+  // Load data from localStorage when user is available
+  useEffect(() => {
+    if (!isLoading && user && !isDataLoaded) {
+      const storageKey = getStorageKey();
+      console.log('🔍 Loading form data for key:', storageKey);
+      
+      const savedData = loadFromLocalStorage<FormData>(storageKey);
+      
+      if (savedData) {
+        console.log('✅ Found saved data:', savedData);
+        setFormData(savedData);
+      } else {
+        console.log('📝 No saved data found, using default');
+        setFormData(getDefaultFormData());
+      }
+      
+      setIsDataLoaded(true);
+    }
+  }, [user, isLoading, isDataLoaded]);
+
+  // Save form data to localStorage whenever it changes (only after user is loaded)
+  useEffect(() => {
+    if (!isLoading && user && isDataLoaded) {
+      const storageKey = getStorageKey();
+      console.log('💾 Saving form data for key:', storageKey, formData);
+      saveToLocalStorage(storageKey, formData);
+      setLastSaved(new Date());
+    }
+  }, [formData, user, isLoading, isDataLoaded]);
+
+  // Auto-save functionality - save every 30 seconds (only after user is loaded)
+  useEffect(() => {
+    if (!isLoading && user && isDataLoaded) {
+      const autoSaveInterval = setInterval(() => {
+        const storageKey = getStorageKey();
+        console.log('🔄 Auto-saving form data for key:', storageKey);
+        saveToLocalStorage(storageKey, formData);
+        setLastSaved(new Date());
+      }, 30000); // Auto-save every 30 seconds
+
+      return () => {
+        clearInterval(autoSaveInterval);
+      };
+    }
+  }, [formData, user, isLoading, isDataLoaded]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -48,16 +106,80 @@ const ReferencingForm = () => {
     e.preventDefault();
     setIsSubmitting(true);
 
+    // Save final form data before submission
+    const storageKey = getStorageKey();
+    saveToLocalStorage(storageKey, formData);
+
     // Simulate API call
     setTimeout(() => {
       setIsSubmitting(false);
       setSubmitSuccess(true);
+      
+      // Mark as submitted in localStorage
+      const userId = user?.id || user?.email || 'anonymous';
+      localStorage.setItem(`referencing_${userId}_submitted`, 'true');
+      
+      // Clear the form data from localStorage after successful submission
+      localStorage.removeItem(`proptii_${storageKey}`);
     }, 2000);
   };
+
+  // Save progress data for dashboard tracking
+  const saveProgressData = () => {
+    const userId = user?.id || user?.email || 'anonymous';
+    const progressData = {
+      currentStep: step,
+      completedSteps: step - 1,
+      percentage: Math.round((step / 3) * 100),
+      status: step === 3 ? 'completed' : 'in_progress',
+      lastUpdated: new Date().toISOString(),
+      sections: {
+        personal: step >= 1,
+        employment: step >= 2,
+        rental: step >= 3
+      }
+    };
+    
+    const progressKey = `progress_${userId}`;
+    saveToLocalStorage(progressKey, progressData);
+  };
+
+  // Update progress when step changes (only after user is loaded)
+  useEffect(() => {
+    if (!isLoading && user && isDataLoaded) {
+      saveProgressData();
+    }
+  }, [step, user, isLoading, isDataLoaded]);
+
+  // Show loading state while user is being loaded
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-8">
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading form...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-8">
       <h2 className="text-3xl font-bold mb-8 text-center">Referencing Application</h2>
+      
+      {/* Auto-save indicator */}
+      {lastSaved && (
+        <div className="text-sm text-gray-500 mb-4 text-center">
+          Last saved: {lastSaved.toLocaleTimeString()}
+        </div>
+      )}
+
+      {/* Debug info (remove in production) */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="text-xs text-gray-400 mb-4 text-center">
+          User: {user?.email || 'Not logged in'} | Storage Key: {getStorageKey()}
+        </div>
+      )}
 
       {submitSuccess ? (
         <div className="text-center py-12">

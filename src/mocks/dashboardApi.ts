@@ -25,7 +25,7 @@ export interface DashboardSummary {
     residential: boolean,
     financial: boolean,
     guarantor: boolean,
-    agentDetails: boolean,
+    creditCheck: boolean,
     
     
   };
@@ -140,7 +140,7 @@ const mockDashboardData: DashboardSummary = {
     residential: true,
     financial: true,
     guarantor: true,
-    agentDetails: true,
+    creditCheck: true,
     get progress() {
       return [
         this.identity,
@@ -148,7 +148,7 @@ const mockDashboardData: DashboardSummary = {
         this.residential,
         this.financial,
         this.guarantor,
-        this.agentDetails
+        this.creditCheck
       ].reduce((acc, curr) => acc + (curr ? 1 : 0), 0);
     },
     get completedSteps() {
